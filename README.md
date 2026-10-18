@@ -19,15 +19,17 @@
 
 ## Instalación
 
-En cualquiera de los repositorios consumidores (`pnpm` / `npm`, Node.js 24+):
+En cualquiera de los repositorios consumidores (`pnpm` / `npm`, Node.js 24+), fijando una etiqueta publicada para que las instalaciones sean reproducibles:
 
 ```json
 {
   "dependencies": {
-    "@turbica/valencia-open-data-core": "github:turbica/valencia-open-data-core#main"
+    "@turbica/valencia-open-data-core": "github:turbica/valencia-open-data-core#v0.2.0"
   }
 }
 ```
+
+Las versiones siguen [SemVer](https://semver.org/lang/es/); consulta las [etiquetas](https://github.com/turbica/valencia-open-data-core/tags) disponibles.
 
 ---
 
@@ -57,6 +59,7 @@ Implementa la regla arquitectónica común de los tres observatorios: **las desc
 - Calcula el hash `SHA-256` de cada descarga y guarda un archivo adjunto `.meta.json` con metadatos de trazabilidad (`sourceUrl`, `capturedAt`, `sha256`, `bytes`, `etag`, `lastModified`, `license`).
 - Evita duplicar archivos si el `SHA-256` coincide exactamente con la última instantánea disponible (`skipIfUnchanged: true`), o añade un sufijo de hash corto si el archivo cambió dentro del mismo día.
 - Soporta un adaptador opcional (`mirror`) para replicar automáticamente cada captura en almacenamiento externo (p. ej. **Google Cloud Storage**).
+- Compresión opcional en disco (`compression: "zstd" | "gzip" | "none"`, por defecto `"none"`), por gestor o por captura, con `node:zlib` y sin dependencias. Añade `.zst` o `.gz` al nombre y registra `compression` y `storedBytes` en el `.meta.json`. El `sha256` y `bytes` siempre corresponden al contenido original, así que la deduplicación no cambia. `readSnapshot(metadata)` devuelve el contenido descomprimido y verifica su hash.
 
 ```ts
 import { SnapshotManager } from "@turbica/valencia-open-data-core";
@@ -69,6 +72,18 @@ const result = await snapshots.downloadAndSave({
   extension: "csv",
   sourceUrl: "https://dadesobertes.gva.es/.../lista-de-viviendas-turisticas.csv",
 });
+
+// Telemetría cada 5 minutos, guardando todas las capturas comprimidas con zstd
+const saih = new SnapshotManager({ rawDir: "./data/raw", compression: "zstd" });
+const captura = await saih.downloadAndSave({
+  category: "saih-jucar",
+  datasetId: "aforos",
+  extension: "html",
+  sourceUrl: urlDesdeFuentesJson,
+  includeTimeInFileName: true,
+  skipIfUnchanged: false,
+});
+const html = await saih.readSnapshot(captura.metadata);
 ```
 
 ### 3. Utilidades Geoespaciales y Normalización (`geo`)

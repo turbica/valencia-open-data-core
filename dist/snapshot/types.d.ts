@@ -1,4 +1,9 @@
 import { z } from "zod";
+export declare const SnapshotCompressionSchema: z.ZodEnum<["none", "gzip", "zstd"]>;
+/**
+ * Compresión del archivo guardado en disco. `zstd` y `gzip` usan `node:zlib` (sin dependencias).
+ */
+export type SnapshotCompression = z.infer<typeof SnapshotCompressionSchema>;
 export declare const SnapshotMetadataSchema: z.ZodObject<{
     category: z.ZodString;
     datasetId: z.ZodString;
@@ -6,8 +11,17 @@ export declare const SnapshotMetadataSchema: z.ZodObject<{
     relativePath: z.ZodString;
     sourceUrl: z.ZodString;
     capturedAt: z.ZodString;
+    /**
+     * Hash y tamaño del contenido original (sin comprimir), tal como llegó de la fuente.
+     */
     sha256: z.ZodString;
     bytes: z.ZodNumber;
+    /**
+     * Compresión y tamaño del archivo en disco. Ausentes en instantáneas anteriores a la v0.2.0
+     * (equivalen a `"none"` y `bytes`).
+     */
+    compression: z.ZodOptional<z.ZodEnum<["none", "gzip", "zstd"]>>;
+    storedBytes: z.ZodOptional<z.ZodNumber>;
     etag: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     lastModified: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     license: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -23,6 +37,8 @@ export declare const SnapshotMetadataSchema: z.ZodObject<{
     bytes: number;
     lastModified?: string | null | undefined;
     etag?: string | null | undefined;
+    compression?: "none" | "gzip" | "zstd" | undefined;
+    storedBytes?: number | undefined;
     license?: string | null | undefined;
     publisher?: string | null | undefined;
 }, {
@@ -36,6 +52,8 @@ export declare const SnapshotMetadataSchema: z.ZodObject<{
     bytes: number;
     lastModified?: string | null | undefined;
     etag?: string | null | undefined;
+    compression?: "none" | "gzip" | "zstd" | undefined;
+    storedBytes?: number | undefined;
     license?: string | null | undefined;
     publisher?: string | null | undefined;
 }>;
@@ -95,6 +113,10 @@ export interface SnapshotManagerOptions {
      * Implementación opcional de `fetch` (útil para tests unitarios).
      */
     fetchImpl?: typeof fetch;
+    /**
+     * Compresión por defecto de las instantáneas. Por defecto `"none"`.
+     */
+    compression?: SnapshotCompression;
 }
 export interface SaveSnapshotInput {
     category: string;
@@ -114,6 +136,12 @@ export interface SaveSnapshotInput {
      * tiene exactamente el mismo `sha256` y evita duplicar el archivo en disco.
      */
     skipIfUnchanged?: boolean;
+    /**
+     * Compresión del archivo en disco (añade `.gz` o `.zst` al nombre). Si se omite, usa la del gestor.
+     * El `sha256` se calcula siempre sobre el contenido original, así que la deduplicación
+     * funciona igual con o sin compresión.
+     */
+    compression?: SnapshotCompression;
     etag?: string | null;
     lastModified?: string | null;
     license?: string | null;

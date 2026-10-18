@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+import { gunzip, gzip, zstdCompress, zstdDecompress } from "node:zlib";
 import { SnapshotMetadataSchema, } from "./types.js";
 async function fileExists(targetPath) {
     try {
@@ -16,6 +18,35 @@ function sanitizeSegment(raw) {
         .trim()
         .replace(/[^a-zA-Z0-9._-]+/g, "-")
         .replace(/^-+|-+$/g, "");
+}
+const COMPRESSION_SUFFIX = {
+    none: "",
+    gzip: ".gz",
+    zstd: ".zst",
+};
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
+const zstdCompressAsync = promisify(zstdCompress);
+const zstdDecompressAsync = promisify(zstdDecompress);
+async function compressBuffer(content, compression) {
+    switch (compression) {
+        case "gzip":
+            return gzipAsync(content);
+        case "zstd":
+            return zstdCompressAsync(content);
+        case "none":
+            return content;
+    }
+}
+async function decompressBuffer(content, compression) {
+    switch (compression) {
+        case "gzip":
+            return gunzipAsync(content);
+        case "zstd":
+            return zstdDecompressAsync(content);
+        case "none":
+            return content;
+    }
 }
 function formatDatePrefix(date, includeTime) {
     const iso = date.toISOString();
@@ -36,6 +67,7 @@ export class SnapshotManager {
     userAgent;
     mirror;
     fetchFn;
+    compression;
     constructor(options) {
         this.rawDir = path.resolve(options.rawDir);
         this.processedDir = options.processedDir
@@ -43,9 +75,10 @@ export class SnapshotManager {
             : path.resolve(this.rawDir, "..", "processed");
         this.userAgent =
             options.userAgent ??
-                "valencia-open-data-core/0.1.0 (+https://github.com/turbica/valencia-open-data-core)";
+                "valencia-open-data-core/0.2.0 (+https://github.com/turbica/valencia-open-data-core)";
         this.mirror = options.mirror;
         this.fetchFn = options.fetchImpl ?? globalThis.fetch;
+        this.compression = options.compression ?? "none";
     }
     /**
      * Descarga un recurso desde su URL de origen y lo persiste de forma inmutable en `data/raw/`.
@@ -88,6 +121,8 @@ export class SnapshotManager {
         const ext = input.extension.replace(/^\.+/, "").trim() || "dat";
         const now = input.capturedAt ?? new Date();
         const skipIfUnchanged = input.skipIfUnchanged ?? true;
+        const compression = input.compression ?? this.compression;
+        const suffix = COMPRESSION_SUFFIX[compression];
         const sha256 = createHash("sha256").update(input.content).digest("hex");
         const shortHash = sha256.slice(0, 8);
         const categoryDir = path.join(this.rawDir, category);
@@ -103,18 +138,19 @@ export class SnapshotManager {
             }
         }
         const datePrefix = formatDatePrefix(now, input.includeTimeInFileName ?? false);
-        let fileName = `${datePrefix}_${datasetId}.${ext}`;
+        let fileName = `${datePrefix}_${datasetId}.${ext}${suffix}`;
         let fullPath = path.join(categoryDir, fileName);
         if (await fileExists(fullPath)) {
-            fileName = `${datePrefix}_${datasetId}_${shortHash}.${ext}`;
+            fileName = `${datePrefix}_${datasetId}_${shortHash}.${ext}${suffix}`;
             fullPath = path.join(categoryDir, fileName);
         }
         let counter = 1;
         while (await fileExists(fullPath)) {
-            fileName = `${datePrefix}_${datasetId}_${shortHash}-${counter}.${ext}`;
+            fileName = `${datePrefix}_${datasetId}_${shortHash}-${counter}.${ext}${suffix}`;
             fullPath = path.join(categoryDir, fileName);
             counter++;
         }
+        const stored = await compressBuffer(input.content, compression);
         const relativePath = path.posix.join("raw", category, fileName);
         const metadata = {
             category,
@@ -125,23 +161,40 @@ export class SnapshotManager {
             capturedAt: now.toISOString(),
             sha256,
             bytes: input.content.byteLength,
+            compression,
+            storedBytes: stored.byteLength,
             etag: input.etag ?? null,
             lastModified: input.lastModified ?? null,
             license: input.license ?? null,
             publisher: input.publisher ?? null,
         };
-        await writeFile(fullPath, input.content, { flag: "wx" });
+        await writeFile(fullPath, stored, { flag: "wx" });
         await writeFile(`${fullPath}.meta.json`, JSON.stringify(metadata, null, 2), {
             flag: "wx",
         });
         if (this.mirror) {
-            await this.mirror.mirrorSnapshot({ metadata, content: input.content });
+            // Se replica el archivo tal como está en disco (comprimido si procede)
+            await this.mirror.mirrorSnapshot({ metadata, content: stored });
         }
         return {
             savedNewFile: true,
             fullPath,
             metadata,
         };
+    }
+    /**
+     * Lee una instantánea de `data/raw/` y devuelve su contenido original, descomprimido si procede.
+     * Verifica el `sha256` para detectar archivos dañados.
+     */
+    async readSnapshot(metadata) {
+        const fullPath = path.join(this.rawDir, sanitizeSegment(metadata.category), metadata.fileName);
+        const stored = await readFile(fullPath);
+        const content = await decompressBuffer(stored, metadata.compression ?? "none");
+        const sha256 = createHash("sha256").update(content).digest("hex");
+        if (sha256 !== metadata.sha256) {
+            throw new Error(`El sha256 de ${metadata.relativePath} no coincide con sus metadatos`);
+        }
+        return content;
     }
     /**
      * Hidrata el directorio local `data/raw/<category>` descargando desde el `mirror` remoto (p. ej. GCS)

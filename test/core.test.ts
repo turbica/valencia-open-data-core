@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -155,6 +156,72 @@ describe("SnapshotManager (Immutable data/raw storage)", () => {
 
       const allSnapshots = await manager.listSnapshots("gva-viviendas-turisticas");
       assert.equal(allSnapshots.length, 2);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("compresses snapshots with zstd/gzip, hashes the original content and reads them back", async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "vod-core-test-"));
+    try {
+      const mirrored: Buffer[] = [];
+      const manager = new SnapshotManager({
+        rawDir: tmpDir,
+        compression: "zstd",
+        mirror: {
+          async mirrorSnapshot({ content }) {
+            mirrored.push(content);
+          },
+        },
+      });
+
+      const html = Buffer.from(`<table>${"<tr><td>CAUDAL</td></tr>".repeat(500)}</table>`, "utf-8");
+      const base = {
+        category: "saih-jucar",
+        datasetId: "aforos",
+        extension: "html",
+        sourceUrl: "https://saih.chj.es/aforos",
+        includeTimeInFileName: true,
+        skipIfUnchanged: false,
+      };
+
+      // 1. Compresión por defecto del gestor (zstd)
+      const res1 = await manager.saveSnapshot({
+        ...base,
+        content: html,
+        capturedAt: new Date("2026-10-18T10:00:00.000Z"),
+      });
+
+      assert.equal(res1.metadata.fileName, "2026-10-18T10-00-00Z_aforos.html.zst");
+      assert.equal(res1.metadata.compression, "zstd");
+      assert.equal(res1.metadata.bytes, html.byteLength);
+      assert.ok(res1.metadata.storedBytes! < html.byteLength);
+      assert.equal(res1.metadata.sha256, createHash("sha256").update(html).digest("hex"));
+      assert.equal((await readFile(res1.fullPath)).byteLength, res1.metadata.storedBytes);
+      assert.equal(mirrored[0]?.byteLength, res1.metadata.storedBytes);
+      assert.deepEqual(await manager.readSnapshot(res1.metadata), html);
+
+      // 2. Compresión por captura (gzip) y sin skipIfUnchanged: se guarda aunque sea idéntico
+      const res2 = await manager.saveSnapshot({
+        ...base,
+        content: html,
+        compression: "gzip",
+        capturedAt: new Date("2026-10-18T10:05:00.000Z"),
+      });
+
+      assert.equal(res2.savedNewFile, true);
+      assert.equal(res2.metadata.fileName, "2026-10-18T10-05-00Z_aforos.html.gz");
+      assert.equal(res2.metadata.sha256, res1.metadata.sha256);
+      assert.deepEqual(await manager.readSnapshot(res2.metadata), html);
+
+      // 3. La deduplicación compara el contenido original aunque esté comprimido
+      const res3 = await manager.saveSnapshot({
+        ...base,
+        content: html,
+        skipIfUnchanged: true,
+        capturedAt: new Date("2026-10-18T10:10:00.000Z"),
+      });
+      assert.equal(res3.savedNewFile, false);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

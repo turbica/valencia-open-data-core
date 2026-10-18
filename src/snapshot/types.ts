@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+export const SnapshotCompressionSchema = z.enum(["none", "gzip", "zstd"]);
+
+/**
+ * Compresión del archivo guardado en disco. `zstd` y `gzip` usan `node:zlib` (sin dependencias).
+ */
+export type SnapshotCompression = z.infer<typeof SnapshotCompressionSchema>;
+
 export const SnapshotMetadataSchema = z.object({
   category: z.string().min(1),
   datasetId: z.string().min(1),
@@ -7,8 +14,17 @@ export const SnapshotMetadataSchema = z.object({
   relativePath: z.string().min(1),
   sourceUrl: z.string().url(),
   capturedAt: z.string().datetime(),
+  /**
+   * Hash y tamaño del contenido original (sin comprimir), tal como llegó de la fuente.
+   */
   sha256: z.string().length(64),
   bytes: z.number().int().nonnegative(),
+  /**
+   * Compresión y tamaño del archivo en disco. Ausentes en instantáneas anteriores a la v0.2.0
+   * (equivalen a `"none"` y `bytes`).
+   */
+  compression: SnapshotCompressionSchema.optional(),
+  storedBytes: z.number().int().nonnegative().optional(),
   etag: z.string().nullable().optional(),
   lastModified: z.string().nullable().optional(),
   license: z.string().nullable().optional(),
@@ -81,6 +97,10 @@ export interface SnapshotManagerOptions {
    * Implementación opcional de `fetch` (útil para tests unitarios).
    */
   fetchImpl?: typeof fetch;
+  /**
+   * Compresión por defecto de las instantáneas. Por defecto `"none"`.
+   */
+  compression?: SnapshotCompression;
 }
 
 export interface SaveSnapshotInput {
@@ -101,6 +121,12 @@ export interface SaveSnapshotInput {
    * tiene exactamente el mismo `sha256` y evita duplicar el archivo en disco.
    */
   skipIfUnchanged?: boolean;
+  /**
+   * Compresión del archivo en disco (añade `.gz` o `.zst` al nombre). Si se omite, usa la del gestor.
+   * El `sha256` se calcula siempre sobre el contenido original, así que la deduplicación
+   * funciona igual con o sin compresión.
+   */
+  compression?: SnapshotCompression;
   etag?: string | null;
   lastModified?: string | null;
   license?: string | null;

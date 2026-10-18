@@ -10,6 +10,7 @@ export declare class SnapshotManager {
     private readonly userAgent;
     private readonly mirror?;
     private readonly fetchFn;
+    private readonly compression;
     constructor(options: SnapshotManagerOptions);
     /**
      * Descarga un recurso desde su URL de origen y lo persiste de forma inmutable en `data/raw/`.
@@ -19,6 +20,11 @@ export declare class SnapshotManager {
      * Guarda un buffer en `data/raw/<category>/` garantizando inmutabilidad (`flag: "wx"`).
      */
     saveSnapshot(input: SaveSnapshotInput): Promise<SnapshotSaveResult>;
+    /**
+     * Lee una instantánea de `data/raw/` y devuelve su contenido original, descomprimido si procede.
+     * Verifica el `sha256` para detectar archivos dañados.
+     */
+    readSnapshot(metadata: SnapshotMetadata): Promise<Buffer>;
     /**
      * Hidrata el directorio local `data/raw/<category>` descargando desde el `mirror` remoto (p. ej. GCS)
      * cualquier instantánea que aún no exista localmente. Ideal para contenedores sin estado (Cloud Run Jobs).
