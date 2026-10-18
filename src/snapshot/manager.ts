@@ -37,17 +37,22 @@ function formatDatePrefix(date: Date, includeTime: boolean): string {
 }
 
 /**
- * Gestor común de instantáneas (`data/raw/`) que garantiza que las descargas
- * jamás se sobrescriban y conserva la trazabilidad criptográfica (SHA-256) y documental.
+ * Gestor común de instantáneas (`data/raw/`) y artefactos (`data/processed/`)
+ * que garantiza que las descargas crudas jamás se sobrescriban y permite operar
+ * tanto en volúmenes locales como en entornos stateless (GCP Cloud Run + Cloud Storage).
  */
 export class SnapshotManager {
   public readonly rawDir: string;
+  public readonly processedDir: string;
   private readonly userAgent: string;
   private readonly mirror?: SnapshotMirrorAdapter;
   private readonly fetchFn: typeof fetch;
 
   constructor(options: SnapshotManagerOptions) {
     this.rawDir = path.resolve(options.rawDir);
+    this.processedDir = options.processedDir
+      ? path.resolve(options.processedDir)
+      : path.resolve(this.rawDir, "..", "processed");
     this.userAgent =
       options.userAgent ??
       "valencia-open-data-core/0.1.0 (+https://github.com/turbica/valencia-open-data-core)";
@@ -129,7 +134,6 @@ export class SnapshotManager {
       fullPath = path.join(categoryDir, fileName);
     }
 
-    // Si incluso con shortHash existe (mismo archivo sin skipIfUnchanged), añadimos sufijo incremental
     let counter = 1;
     while (await fileExists(fullPath)) {
       fileName = `${datePrefix}_${datasetId}_${shortHash}-${counter}.${ext}`;
@@ -167,6 +171,74 @@ export class SnapshotManager {
       fullPath,
       metadata,
     };
+  }
+
+  /**
+   * Hidrata el directorio local `data/raw/<category>` descargando desde el `mirror` remoto (p. ej. GCS)
+   * cualquier instantánea que aún no exista localmente. Ideal para contenedores sin estado (Cloud Run Jobs).
+   */
+  async hydrateCategoryFromMirror(
+    category: string,
+    datasetId?: string
+  ): Promise<number> {
+    if (!this.mirror?.listRemoteSnapshots || !this.mirror?.downloadRemoteSnapshot) {
+      return 0;
+    }
+
+    const cleanCategory = sanitizeSegment(category);
+    const categoryDir = path.join(this.rawDir, cleanCategory);
+    await mkdir(categoryDir, { recursive: true });
+
+    const remoteList = await this.mirror.listRemoteSnapshots(cleanCategory, datasetId);
+    let downloadedCount = 0;
+
+    for (const meta of remoteList) {
+      const localDataPath = path.join(categoryDir, meta.fileName);
+      const localMetaPath = `${localDataPath}.meta.json`;
+      if (await fileExists(localDataPath)) {
+        continue;
+      }
+
+      const content = await this.mirror.downloadRemoteSnapshot(meta.relativePath);
+      if (!content) continue;
+
+      await writeFile(localDataPath, content, { flag: "wx" });
+      if (!(await fileExists(localMetaPath))) {
+        await writeFile(localMetaPath, JSON.stringify(meta, null, 2), { flag: "wx" });
+      }
+      downloadedCount++;
+    }
+
+    return downloadedCount;
+  }
+
+  /**
+   * Guarda un artefacto procesado en `data/processed/` y lo replica en el almacenamiento remoto (si está configurado).
+   */
+  async saveProcessedArtifact(params: {
+    fileName: string;
+    content: Buffer | string;
+    contentType?: string;
+  }): Promise<string> {
+    await mkdir(this.processedDir, { recursive: true });
+    const fullPath = path.join(this.processedDir, params.fileName);
+    const buf =
+      typeof params.content === "string"
+        ? Buffer.from(params.content, "utf-8")
+        : params.content;
+
+    await writeFile(fullPath, buf);
+
+    if (this.mirror?.saveProcessedArtifact) {
+      const relativePath = path.posix.join("processed", params.fileName);
+      await this.mirror.saveProcessedArtifact({
+        relativePath,
+        content: buf,
+        contentType: params.contentType,
+      });
+    }
+
+    return fullPath;
   }
 
   /**

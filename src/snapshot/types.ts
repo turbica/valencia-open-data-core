@@ -34,13 +34,30 @@ export interface SnapshotSaveResult {
 }
 
 /**
- * Interfaz para replicar instantáneas en almacenamiento externo (ej. Google Cloud Storage).
+ * Interfaz para replicar e hidratar instantáneas (`raw/`) y artefactos (`processed/`)
+ * en almacenamiento externo en la nube (ej. Google Cloud Storage), permitiendo ejecuciones
+ * totalmente sin estado (stateless) en servicios como GCP Cloud Run.
  */
 export interface SnapshotMirrorAdapter {
   mirrorSnapshot(params: {
     metadata: SnapshotMetadata;
     content: Buffer;
   }): Promise<void>;
+
+  listRemoteSnapshots?(
+    category: string,
+    datasetId?: string
+  ): Promise<SnapshotMetadata[]>;
+
+  downloadRemoteSnapshot?(relativePath: string): Promise<Buffer | null>;
+
+  saveProcessedArtifact?(params: {
+    relativePath: string;
+    content: Buffer;
+    contentType?: string;
+  }): Promise<void>;
+
+  downloadProcessedArtifact?(relativePath: string): Promise<Buffer | null>;
 }
 
 export interface SnapshotManagerOptions {
@@ -49,11 +66,15 @@ export interface SnapshotManagerOptions {
    */
   rawDir: string;
   /**
+   * Ruta opcional al directorio `data/processed` donde se guardan los datos procesados.
+   */
+  processedDir?: string;
+  /**
    * Cabecera User-Agent por defecto para las descargas HTTP.
    */
   userAgent?: string;
   /**
-   * Adaptador opcional para replicar cada nueva instantánea en la nube (p. ej. GCS).
+   * Adaptador opcional para replicar e hidratar datos desde la nube (p. ej. GCS).
    */
   mirror?: SnapshotMirrorAdapter;
   /**

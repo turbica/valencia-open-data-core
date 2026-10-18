@@ -8,6 +8,7 @@ import {
   isFeatureCollection,
   normalizeBarrioCode,
   normalizeCkanActionBaseUrl,
+  normalizeCodDistBar,
   normalizeTerritoryName,
   normalizeValencianPostalCode,
   SnapshotManager,
@@ -166,6 +167,9 @@ describe("Geo & Valencian Territorial Normalization", () => {
     assert.equal(normalizeValencianPostalCode(3001), "03001");
     assert.equal(normalizeValencianPostalCode("28001"), null);
     assert.equal(normalizeBarrioCode(1, 3), "01.03");
+    assert.equal(normalizeCodDistBar(61), "061");
+    assert.equal(normalizeCodDistBar("03", "4"), "034");
+    assert.equal(normalizeCodDistBar("6", "62"), "062");
     assert.equal(normalizeTerritoryName("El Cabanyal-El Canyamelar"), "el cabanyal el canyamelar");
     assert.equal(
       isFeatureCollection({

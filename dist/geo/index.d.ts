@@ -178,10 +178,14 @@ export declare function isFeatureCollection(value: unknown): value is GeoJsonFea
  */
 export declare function normalizeValencianPostalCode(raw: string | number | null | undefined): string | null;
 /**
- * Normaliza códigos municipales de distrito (2 dígitos) o barrio (ej. "01.1" o "0101")
- * del Ayuntamiento de València y su Oficina de Estadística.
+ * Normaliza códigos municipales de distrito (2 dígitos) y barrio (2 dígitos) con punto ("01.03").
  */
 export declare function normalizeBarrioCode(distrito: string | number, barrio: string | number): string;
+/**
+ * Normaliza el código municipal de 3 dígitos `coddistbar` del Ayuntamiento de València (`011`..`198`),
+ * aceptando tanto un código combinado (`61` -> `'061'`, `'142'` -> `'142'`) como distrito y barrio por separado (`3`, `4` -> `'034'`).
+ */
+export declare function normalizeCodDistBar(distritoOrCombined: string | number | null | undefined, barrio?: string | number | null | undefined): string | null;
 /**
  * Normaliza nombres de barrios o municipios en valenciano/castellano para cruces de texto
  * (elimina diacríticos, pasa a minúsculas y compacta espacios).

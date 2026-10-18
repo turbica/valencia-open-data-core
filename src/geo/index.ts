@@ -34,7 +34,9 @@ export function isFeatureCollection(value: unknown): value is GeoJsonFeatureColl
  * Normaliza un código postal de la provincia de València (46xxx) o de la Comunitat Valenciana
  * (03xxx, 12xxx, 46xxx) asegurando 5 dígitos con cero inicial si procede.
  */
-export function normalizeValencianPostalCode(raw: string | number | null | undefined): string | null {
+export function normalizeValencianPostalCode(
+  raw: string | number | null | undefined
+): string | null {
   if (raw === null || raw === undefined) return null;
   const digits = String(raw).trim().replace(/\D+/g, "");
   if (!digits) return null;
@@ -48,8 +50,7 @@ export function normalizeValencianPostalCode(raw: string | number | null | undef
 }
 
 /**
- * Normaliza códigos municipales de distrito (2 dígitos) o barrio (ej. "01.1" o "0101")
- * del Ayuntamiento de València y su Oficina de Estadística.
+ * Normaliza códigos municipales de distrito (2 dígitos) y barrio (2 dígitos) con punto ("01.03").
  */
 export function normalizeBarrioCode(
   distrito: string | number,
@@ -58,6 +59,32 @@ export function normalizeBarrioCode(
   const d = String(distrito).trim().replace(/\D+/g, "").padStart(2, "0");
   const b = String(barrio).trim().replace(/\D+/g, "").padStart(2, "0");
   return `${d}.${b}`;
+}
+
+/**
+ * Normaliza el código municipal de 3 dígitos `coddistbar` del Ayuntamiento de València (`011`..`198`),
+ * aceptando tanto un código combinado (`61` -> `'061'`, `'142'` -> `'142'`) como distrito y barrio por separado (`3`, `4` -> `'034'`).
+ */
+export function normalizeCodDistBar(
+  distritoOrCombined: string | number | null | undefined,
+  barrio?: string | number | null | undefined
+): string | null {
+  if (distritoOrCombined === null || distritoOrCombined === undefined) return null;
+  if (barrio !== undefined && barrio !== null && String(barrio).trim() !== "") {
+    const d = String(distritoOrCombined).trim().replace(/\D+/g, "");
+    const b = String(barrio).trim().replace(/\D+/g, "");
+    if (!d || !b) return null;
+    // En casos donde `barrio` ya viene como el código combinado de 2-3 dígitos (p.ej. 62)
+    if (b.length >= 2 && b.startsWith(d)) {
+      return b.padStart(3, "0");
+    }
+    return `${d.padStart(2, "0")}${b}`;
+  }
+  const combined = String(distritoOrCombined).trim().replace(/\D+/g, "");
+  if (!combined) return null;
+  const num = Number(combined);
+  if (!Number.isFinite(num) || num < 11 || num > 199) return null;
+  return combined.padStart(3, "0");
 }
 
 /**
