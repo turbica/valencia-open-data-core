@@ -1,0 +1,42 @@
+{
+  "name": "@turbica/valencia-open-data-core",
+  "version": "0.1.0",
+  "description": "Cliente CKAN, gestor inmutable de instantáneas (snapshots) y utilidades geoespaciales para los observatorios de datos abiertos de València y la Comunitat Valenciana",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/turbica/valencia-open-data-core.git"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@10.6.5",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.2"
+  }
+}
